@@ -1,0 +1,3 @@
+discord
+d20
+python-dotenv
