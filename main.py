@@ -30,7 +30,15 @@ async def on_reaction_add(reaction, user):
     webhook = await bot.fetch_webhook(reaction.message.webhook_id)
     if webhook.name != webhook_name:
         return
-    await webhook.delete_message(reaction.message.id)
+    message = reaction.message
+    thread = None
+    if hasattr(message.channel, "parent"):
+        thread = message.channel
+
+    if thread is None:
+        await webhook.delete_message(reaction.message.id)
+        return
+    await webhook.delete_message(reaction.message.id, thread=thread)
 
 
 @bot.event
