@@ -3,6 +3,7 @@ import d20
 import re
 import os
 import json
+import asyncio
 from repository import ConfigRepository
 from discord.ext import commands
 from dotenv import load_dotenv
@@ -213,7 +214,7 @@ async def edit_reaction_message(reaction, user, webhook):
     match = re.findall(pattern, reaction.message.content)
     to_be_edited = reaction.message.content.replace(match[0], "")
     await user.send(
-        f"Proxy edited: <{reaction.message.jump_url}⁠>\n" +
+        f"Proxy edited: {reaction.message.jump_url}⁠\n" +
         "Editing message:"
     )
     await user.send(to_be_edited)
@@ -222,25 +223,30 @@ async def edit_reaction_message(reaction, user, webhook):
     def check_message(m):
         return m.channel == user.dm_channel and m.author == user
 
-    msg = await bot.wait_for('message', check=check_message, timeout=900)
+    try:
+        msg = await bot.wait_for('message', check=check_message, timeout=300)
+    except asyncio.TimeoutError:
+        await user.send("Timed out. Message not edited.")
+        await reaction.clear()
+        return
+    else:
+        message = reaction.message
+        thread = None
+        if hasattr(message.channel, "parent"):
+            thread = message.channel
 
-    message = reaction.message
-    thread = None
-    if hasattr(message.channel, "parent"):
-        thread = message.channel
-
-    await reaction.clear()
-    if thread is None:
+        await reaction.clear()
+        if thread is None:
+            await webhook.edit_message(
+                message.id,
+                content=msg.content + match[0]
+            )
+            return
         await webhook.edit_message(
             message.id,
-            content=msg.content + match[0]
+            content=msg.content + match[0],
+            thread=thread
         )
-        return
-    await webhook.edit_message(
-        message.id,
-        content=msg.content + match[0],
-        thread=thread
-    )
 
 
 bot.run(TOKEN)
