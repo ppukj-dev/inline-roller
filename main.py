@@ -73,6 +73,7 @@ async def on_reaction_add(reaction, user):
 @bot.event
 async def on_message(message):
     await bot.process_commands(message)
+    await edit_by_tul_edit(message)
     if not hasattr(message, "webhook_id") or message.webhook_id is None:
         return
     webhook = await bot.fetch_webhook(message.webhook_id)
@@ -248,6 +249,55 @@ async def edit_reaction_message(reaction, user, webhook):
             content=msg.content + match[0],
             thread=thread
         )
+
+
+async def edit_by_tul_edit(message):
+    if not message.content.startswith("tul!edit"):
+        return
+    await delete_tupper_edit_error(message)
+    if message.reference is None:
+        return
+    if len(message.content.split(" ", 1)) <= 1:
+        return
+    content = message.content.split(" ", 1)[1]
+    reply_message = await message.channel.fetch_message(
+        message.reference.message_id)
+    if reply_message.webhook_id is None:
+        return
+    webhook_name = f"{bot.application.name}hook"
+    webhook = await bot.fetch_webhook(reply_message.webhook_id)
+    if webhook.name != webhook_name:
+        return
+    await message.delete()
+    pattern = r" \[`🔻`\]\(https://.*?\)$"
+    match = re.findall(pattern, reply_message.content)
+    thread = None
+    if hasattr(reply_message.channel, "parent"):
+        thread = reply_message.channel
+
+    if thread is None:
+        await webhook.edit_message(
+            reply_message.id,
+            content=content + match[0]
+        )
+        return
+    await webhook.edit_message(
+        reply_message.id,
+        content=content + match[0],
+        thread=thread
+    )
+
+
+async def delete_tupper_edit_error(message):
+    error = "That message doesn't seem to be a proxy sent with Tupperbox."
+    id = 431544605209788416
+
+    def check(m) -> bool:
+        return m.channel.id == message.channel.id and \
+            m.author.id == id and \
+            m.content == error
+    msg = await bot.wait_for('message', check=check, timeout=10)
+    await msg.delete()
 
 
 bot.run(TOKEN)
