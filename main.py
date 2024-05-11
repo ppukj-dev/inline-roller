@@ -86,6 +86,7 @@ async def on_message(message):
     display_name = message.author.display_name
     avatar = message.author.avatar
     channel = message.channel
+    channel_mention = channel.mention
 
     thread = None
     dump_channel_id = get_dump_channel_from_config(message.guild.id)
@@ -125,7 +126,7 @@ async def on_message(message):
     full_result = '\n'.join(result_texts)
 
     dump_message = await dump_channel.send(
-        f"@{display_name}:" + "\n" +
+        f"**{display_name}** in {channel_mention}:" + "\n" +
         full_result
     )
 
