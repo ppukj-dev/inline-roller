@@ -1,58 +1,57 @@
-import mysql.connector
-import os
-from dotenv import load_dotenv
-
-load_dotenv('.env')
-MYSQL_HOST = os.getenv('MYSQL_HOST')
-MYSQL_USER = os.getenv('MYSQL_USER')
-MYSQL_PASS = os.getenv('MYSQL_PASS')
-MYSQL_DB = os.getenv('MYSQL_DB')
+import sqlite3
 
 
-def get_config(guild_id: str):
+class Repository:
+    def __init__(self):
+        self.connection = sqlite3.connect("database/inline_roller.db")
+        self.cursor = self.connection.cursor()
+        self.cursor.execute("""CREATE TABLE IF NOT EXISTS server_config (
+            id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+            guild_id VARCHAR(255) NOT NULL UNIQUE,
+            config JSON NOT NULL
+        )""")
+        self.cursor.close()
+        self.connection.close()
 
-    mydb = mysql.connector.connect(
-            host=MYSQL_HOST,
-            user=MYSQL_USER,
-            password=MYSQL_PASS,
-            database=MYSQL_DB
-    )
+    def __enter__(self):
+        self.connection = sqlite3.connect("database/inline_roller.db")
+        self.cursor = self.connection.cursor()
+        return self
 
-    query = """
-    SELECT 
-        config 
-    FROM server_config
-    WHERE guild_id = %s
-    LIMIT 1
-    """
-
-    cursor = mydb.cursor(buffered=True)
-    cursor.execute(query, (guild_id,))
-    result = cursor.fetchone()
-    cursor.close()
-    mydb.close()
-
-    return result
+    def __exit__(self, type, value, traceback):
+        self.cursor.close()
+        self.connection.close()
 
 
-def set_dump_channel(guild_id: str, dump_channel_id: str) -> None:
+class ConfigRepository(Repository):
+    def __init__(self):
+        super().__init__()
 
-    mydb = mysql.connector.connect(
-            host=MYSQL_HOST,
-            user=MYSQL_USER,
-            password=MYSQL_PASS,
-            database=MYSQL_DB
-    )
+    def get_config(self, guild_id: str):
+        query = """
+        SELECT 
+            config 
+        FROM server_config
+        WHERE guild_id = ?
+        LIMIT 1
+        """
 
-    query = """
-    INSERT INTO server_config (guild_id, config)
-    VALUES (%s, JSON_SET('\{\}', '$.dump_channel_id', %s))
-    ON DUPLICATE KEY UPDATE
-        config = JSON_SET(config, '$.dump_channel_id', %s)
-    """
+        with self as db:
+            db.cursor.execute(query, (guild_id,))
+            result = db.cursor.fetchone()
 
-    cursor = mydb.cursor(buffered=True)
-    cursor.execute(query, (guild_id, dump_channel_id, dump_channel_id))
-    mydb.commit()
-    cursor.close()
-    mydb.close()
+        return result
+    
+    def set_dump_channel(self, guild_id: str, dump_channel_id: str) -> None:
+        query = """
+        INSERT INTO server_config (guild_id, config)
+        VALUES (?, JSON_SET('{}', '$.dump_channel_id', ?))
+        ON CONFLICT(guild_id) DO UPDATE
+            SET config = JSON_SET(config, '$.dump_channel_id', ?)
+        """
+
+        with self as db:
+            db.cursor.execute(query, (
+                guild_id, dump_channel_id,
+                dump_channel_id))
+            db.connection.commit()

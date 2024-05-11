@@ -3,7 +3,7 @@ import d20
 import re
 import os
 import json
-from repository import set_dump_channel, get_config
+from repository import ConfigRepository
 from discord.ext import commands
 from dotenv import load_dotenv
 
@@ -11,11 +11,12 @@ load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 
 intents = discord.Intents.all()
+command_prefix = ";;"
 
-bot = commands.Bot(command_prefix=[";;"], intents=intents)
+bot = commands.Bot(command_prefix=[command_prefix], intents=intents)
 
 
-@bot.command(name="dump")
+@bot.command(name="setdump")
 async def set_dump(ctx, *, channel_url=None):
     dump_channel_id = ctx.channel.id
     if channel_url is not None:
@@ -24,13 +25,21 @@ async def set_dump(ctx, *, channel_url=None):
     if hasattr(dump_channel, "parent"):
         dump_channel_id = dump_channel.parent.id
     guild_id = ctx.guild.id
-    set_dump_channel(guild_id, dump_channel_id)
+    config_repo = ConfigRepository()
+    config_repo.set_dump_channel(guild_id, dump_channel_id)
     await ctx.send(f"Dump channel set to <#{dump_channel_id}>")
 
 
 @bot.command(name="getdump")
 async def get_dump(ctx):
-    config_string = get_config(ctx.guild.id)[0]
+    config_repo = ConfigRepository()
+    if config_repo.get_config(ctx.guild.id) is None:
+        await ctx.send(
+            "No dump channel set.\n" +
+            f"Use `{command_prefix}setdump` to set one."
+        )
+        return
+    config_string = config_repo.get_config(ctx.guild.id)[0]
     config = json.loads(config_string)
     await ctx.send(f"Dump channel: <#{config['dump_channel_id']}>")
 
@@ -81,11 +90,21 @@ async def on_message(message):
     channel = message.channel
 
     thread = None
-    dump_channel = await bot.fetch_channel(939933100752924693)
+    dump_channel_id = get_dump_channel_from_config(message.guild.id)
+    if dump_channel_id != "0":
+        dump_channel = await bot.fetch_channel(dump_channel_id)
     if hasattr(message.channel, "parent"):
         channel = message.channel.parent
         thread = message.channel
         dump_channel = channel
+
+    if dump_channel_id == "0" and thread is None:
+        await message.channel.send(
+            "No dump channel set.\n" +
+            "Please use in thread, or set one first.\n" +
+            f"Use `{command_prefix}setdump` to set one."
+        )
+        return
 
     webhook = await create_webhook_by_channel(channel, bot.application.name)
 
@@ -172,7 +191,10 @@ def get_channel_id_from_url(channel_url: int):
 
 
 def get_dump_channel_from_config(guild_id) -> str:
-    config_string = get_config(guild_id)[0]
+    config_repo = ConfigRepository()
+    if config_repo.get_config(guild_id) is None:
+        return "0"
+    config_string = config_repo.get_config(guild_id)[0]
     config = json.loads(config_string)
     return config['dump_channel_id']
 
