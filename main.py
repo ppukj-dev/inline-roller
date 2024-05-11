@@ -2,6 +2,8 @@ import discord
 import d20
 import re
 import os
+import json
+from repository import set_dump_channel, get_config
 from discord.ext import commands
 from dotenv import load_dotenv
 
@@ -11,6 +13,26 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 intents = discord.Intents.all()
 
 bot = commands.Bot(command_prefix=[";;"], intents=intents)
+
+
+@bot.command(name="dump")
+async def set_dump(ctx, *, channel_url=None):
+    dump_channel_id = ctx.channel.id
+    if channel_url is not None:
+        dump_channel_id = int(get_channel_id_from_url(channel_url))
+    dump_channel = await bot.fetch_channel(dump_channel_id)
+    if hasattr(dump_channel, "parent"):
+        dump_channel_id = dump_channel.parent.id
+    guild_id = ctx.guild.id
+    set_dump_channel(guild_id, dump_channel_id)
+    await ctx.send(f"Dump channel set to <#{dump_channel_id}>")
+
+
+@bot.command(name="getdump")
+async def get_dump(ctx):
+    config_string = get_config(ctx.guild.id)[0]
+    config = json.loads(config_string)
+    await ctx.send(f"Dump channel: <#{config['dump_channel_id']}>")
 
 
 @bot.event
@@ -43,6 +65,7 @@ async def on_reaction_add(reaction, user):
 
 @bot.event
 async def on_message(message):
+    await bot.process_commands(message)
     if not hasattr(message, "webhook_id") or message.webhook_id is None:
         return
     webhook = await bot.fetch_webhook(message.webhook_id)
@@ -139,6 +162,19 @@ async def send_to_thread_by_webhook(thread, content, avatar, username,
 def find_inline_roll(content: str):
     pattern = r'\[\[(.*?)\]\]'
     return re.findall(pattern=pattern, string=content)
+
+
+def get_channel_id_from_url(channel_url: int):
+    channel_id = re.findall(r"(\d+)$", channel_url)[0]
+    if channel_id.isdigit():
+        return int(channel_id)
+    return 0
+
+
+def get_dump_channel_from_config(guild_id) -> str:
+    config_string = get_config(guild_id)[0]
+    config = json.loads(config_string)
+    return config['dump_channel_id']
 
 
 bot.run(TOKEN)
