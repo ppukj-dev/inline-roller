@@ -55,21 +55,18 @@ async def on_reaction_add(reaction, user):
         return
     if reaction.message.webhook_id is None:
         return
-    if reaction.emoji != "❌":
+    if reaction.emoji not in ["❌", "📝"]:
         return
     webhook_name = f"{bot.application.name}hook"
     webhook = await bot.fetch_webhook(reaction.message.webhook_id)
     if webhook.name != webhook_name:
         return
-    message = reaction.message
-    thread = None
-    if hasattr(message.channel, "parent"):
-        thread = message.channel
-
-    if thread is None:
-        await webhook.delete_message(reaction.message.id)
+    if reaction.emoji == "❌":
+        await delete_reaction_message(reaction, user, webhook)
         return
-    await webhook.delete_message(reaction.message.id, thread=thread)
+    if reaction.emoji == "📝":
+        await edit_reaction_message(reaction, user, webhook)
+        return
 
 
 @bot.event
@@ -197,6 +194,53 @@ def get_dump_channel_from_config(guild_id) -> str:
     config_string = config_repo.get_config(guild_id)[0]
     config = json.loads(config_string)
     return config['dump_channel_id']
+
+
+async def delete_reaction_message(reaction, user, webhook):
+    message = reaction.message
+    thread = None
+    if hasattr(message.channel, "parent"):
+        thread = message.channel
+
+    if thread is None:
+        await webhook.delete_message(reaction.message.id)
+        return
+    await webhook.delete_message(reaction.message.id, thread=thread)
+
+
+async def edit_reaction_message(reaction, user, webhook):
+    pattern = r" \[`🔻`\]\(https://.*?\)$"
+    match = re.findall(pattern, reaction.message.content)
+    to_be_edited = reaction.message.content.replace(match[0], "")
+    await user.send(
+        f"Proxy edited: <{reaction.message.jump_url}⁠>\n" +
+        "Editing message:"
+    )
+    await user.send(to_be_edited)
+    await user.send("Please send me the new content of the message here:")
+
+    def check_message(m):
+        return m.channel == user.dm_channel and m.author == user
+
+    msg = await bot.wait_for('message', check=check_message, timeout=900)
+
+    message = reaction.message
+    thread = None
+    if hasattr(message.channel, "parent"):
+        thread = message.channel
+
+    await reaction.clear()
+    if thread is None:
+        await webhook.edit_message(
+            message.id,
+            content=msg.content + match[0]
+        )
+        return
+    await webhook.edit_message(
+        message.id,
+        content=msg.content + match[0],
+        thread=thread
+    )
 
 
 bot.run(TOKEN)
