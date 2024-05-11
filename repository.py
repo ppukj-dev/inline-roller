@@ -29,8 +29,8 @@ class ConfigRepository(Repository):
 
     def get_config(self, guild_id: str):
         query = """
-        SELECT 
-            config 
+        SELECT
+            config
         FROM server_config
         WHERE guild_id = ?
         LIMIT 1
@@ -41,7 +41,7 @@ class ConfigRepository(Repository):
             result = db.cursor.fetchone()
 
         return result
-    
+
     def set_dump_channel(self, guild_id: str, dump_channel_id: str) -> None:
         query = """
         INSERT INTO server_config (guild_id, config)
