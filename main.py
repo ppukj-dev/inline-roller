@@ -4,7 +4,7 @@ import re
 import os
 import json
 import asyncio
-from repository import ConfigRepository
+from repository import ConfigRepository, RollHistoryRepository
 from discord.ext import commands
 from dotenv import load_dotenv
 
@@ -109,6 +109,7 @@ async def on_message(message):
     webhook = await create_webhook_by_channel(channel, bot.application.name)
 
     result_texts = []
+    histories_list = []
     for inline_roll in inline_rolls:
         result = d20.roll(inline_roll, allow_comments=True)
         result_text = f"{result.comment}: {result}" if result.comment else \
@@ -124,7 +125,13 @@ async def on_message(message):
         comment = f" {result.comment}" if result.comment else ""
         inline_replacement = f"`( {result.total}{crit}{comment} )`"
         content = content.replace(f"[[{inline_roll}]]", inline_replacement, 1)
+        histories_list.append({
+            "message": message,
+            "d20_roll": result,
+            "command": inline_roll
+        })
     full_result = '\n'.join(result_texts)
+    asyncio.create_task(insert_roll_histories(histories_list))
 
     dump_message = await dump_channel.send(
         f"**{display_name}** in {channel_mention}:" + "\n" +
@@ -298,6 +305,38 @@ async def delete_tupper_edit_error(message):
             m.content == error
     msg = await bot.wait_for('message', check=check, timeout=10)
     await msg.delete()
+
+
+async def insert_roll_history(
+        message: discord.Message,
+        d20_roll: d20.RollResult,
+        command: str
+        ):
+    comment = d20_roll.comment
+    if comment is not None:
+        command = command.replace(comment, "")
+        command = command.strip()
+    history_repo = RollHistoryRepository()
+    history_repo.add_history(
+        guild_id=message.guild.id,
+        character_name=message.author.name,
+        dice_roll=command,
+        result=d20_roll.result,
+        expression=str(d20_roll.expr),
+        crit=d20_roll.crit,
+        room_name=message.channel.name
+    )
+
+
+async def insert_roll_histories(
+        histories_list
+        ):
+    for history in histories_list:
+        await insert_roll_history(
+            message=history['message'],
+            d20_roll=history['d20_roll'],
+            command=history['command']
+        )
 
 
 bot.run(TOKEN)
