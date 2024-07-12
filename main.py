@@ -88,15 +88,18 @@ async def on_message(message):
     avatar = message.author.avatar
     channel = message.channel
     channel_mention = channel.mention
+    has_dump_channel = False
 
     thread = None
     dump_channel_id = get_dump_channel_from_config(message.guild.id)
     if dump_channel_id != "0":
         dump_channel = await bot.fetch_channel(dump_channel_id)
+        has_dump_channel = True
     if hasattr(message.channel, "parent"):
         channel = message.channel.parent
         thread = message.channel
-        dump_channel = channel
+        if not has_dump_channel:
+            dump_channel = channel
 
     if dump_channel_id == "0" and thread is None:
         await message.channel.send(
