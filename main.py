@@ -126,7 +126,7 @@ async def on_message(message):
         else:
             pass
         comment = f" {result.comment}" if result.comment else ""
-        inline_replacement = f"《 {result.total}{crit}{comment} 》"
+        inline_replacement = f"【 {result.total}{crit}{comment} 】"
         content = content.replace(f"[[{inline_roll}]]", inline_replacement, 1)
         histories_list.append({
             "message": message,
