@@ -34,8 +34,37 @@ class ParseTestCase(unittest.TestCase):
             {"count": 3, "focus": 1, "target": 10, "comp": 20},
         )
 
-    def test_wrong_field_order_rejected(self):
-        self.assertIsNone(modiphius.parse_test("2d20t12f3"))
+    def test_field_order_is_interchangeable(self):
+        expected = {"count": 2, "focus": 3, "target": 12, "comp": 19}
+        for expr in [
+            "2d20f3t12c19",
+            "2d20f3c19t12",
+            "2d20t12f3c19",
+            "2d20t12c19f3",
+            "2d20c19f3t12",
+            "2d20c19t12f3",
+        ]:
+            self.assertEqual(modiphius.parse_test(expr), expected, expr)
+
+    def test_partial_fields_any_order(self):
+        # t + c only, c before t.
+        self.assertEqual(
+            modiphius.parse_test("2d20c19t12"),
+            {"count": 2, "focus": 1, "target": 12, "comp": 19},
+        )
+        # t + f only, t before f.
+        self.assertEqual(
+            modiphius.parse_test("2d20t12f3"),
+            {"count": 2, "focus": 3, "target": 12, "comp": 20},
+        )
+
+    def test_duplicate_field_rejected(self):
+        self.assertIsNone(modiphius.parse_test("2d20t12t14"))
+        self.assertIsNone(modiphius.parse_test("2d20f3f4t12"))
+
+    def test_trailing_junk_rejected(self):
+        self.assertIsNone(modiphius.parse_test("2d20t12x"))
+        self.assertIsNone(modiphius.parse_test("2d20t12 f3"))
 
     def test_plain_d20_is_not_a_test(self):
         # Must fall through to the d20 arithmetic path, not the Modiphius one.
@@ -106,40 +135,51 @@ class EvaluateChallengeCase(unittest.TestCase):
 
 
 class FormatCase(unittest.TestCase):
-    def test_full_success_and_complication(self):
+    def test_full_shows_command_and_decode(self):
         self.assertEqual(
-            modiphius.format_test_full([1, 20], 2, 1),
-            "🎲 Rolling 2d20: [1, 20]\n✨ 2 Successes | ⚠️ 1 Complication",
+            modiphius.format_test_full("2d20f3t12c19", [1, 20], 3, 12, 19, 2, 1),
+            "🎲 Rolling `2d20f3t12c19` · 2d20 · Focus 3 · TN 12 · Comp 19+\n"
+            "Dice: [1, 20]\n"
+            "✨ 2 Successes | ⚠️ 1 Complication",
         )
 
     def test_full_success_only(self):
         self.assertEqual(
-            modiphius.format_test_full([3, 15], 2, 0),
-            "🎲 Rolling 2d20: [3, 15]\n✨ 2 Successes",
+            modiphius.format_test_full("2d20f3t12", [3, 15], 3, 12, 20, 2, 0),
+            "🎲 Rolling `2d20f3t12` · 2d20 · Focus 3 · TN 12 · Comp 20+\n"
+            "Dice: [3, 15]\n"
+            "✨ 2 Successes",
         )
 
     def test_full_failure_with_complication(self):
         self.assertEqual(
-            modiphius.format_test_full([15, 20], 0, 1),
-            "🎲 Rolling 2d20: [15, 20]\n💥 [Failure] | ⚠️ 1 Complication",
+            modiphius.format_test_full("2d20t12", [15, 20], 1, 12, 20, 0, 1),
+            "🎲 Rolling `2d20t12` · 2d20 · Focus 1 · TN 12 · Comp 20+\n"
+            "Dice: [15, 20]\n"
+            "💥 [Failure] | ⚠️ 1 Complication",
         )
 
     def test_full_failure(self):
         self.assertEqual(
-            modiphius.format_test_full([15, 16], 0, 0),
-            "🎲 Rolling 2d20: [15, 16]\n💥 [Failure]",
+            modiphius.format_test_full("2d20t12", [15, 16], 1, 12, 20, 0, 0),
+            "🎲 Rolling `2d20t12` · 2d20 · Focus 1 · TN 12 · Comp 20+\n"
+            "Dice: [15, 16]\n"
+            "💥 [Failure]",
         )
 
     def test_single_success_is_singular(self):
         self.assertEqual(
-            modiphius.format_test_full([10], 1, 0),
-            "🎲 Rolling 1d20: [10]\n✨ 1 Success",
+            modiphius.format_test_full("1d20t12", [10], 1, 12, 20, 1, 0),
+            "🎲 Rolling `1d20t12` · 1d20 · Focus 1 · TN 12 · Comp 20+\n"
+            "Dice: [10]\n"
+            "✨ 1 Success",
         )
 
     def test_challenge_full(self):
         self.assertEqual(
-            modiphius.format_challenge_full([1, 2, 5], 4, 1),
-            "🎲 Rolling 3d6: [1, 2, 5]\n"
+            modiphius.format_challenge_full("3cd", [1, 2, 5], 4, 1),
+            "🎲 Rolling `3cd` · 3 Challenge Dice\n"
+            "Dice: [1, 2, 5]\n"
             "**Total Result:** 4 | **Total Effects:** 1",
         )
 
@@ -154,7 +194,7 @@ class RollCase(unittest.TestCase):
 
     def test_challenge_roll_shape(self):
         out = modiphius.roll("6cd")
-        self.assertTrue(out["full_text"].startswith("🎲 Rolling 6d6:"))
+        self.assertTrue(out["full_text"].startswith("🎲 Rolling `6cd`"))
 
     def test_non_modiphius_returns_none(self):
         self.assertIsNone(modiphius.roll("2d20"))

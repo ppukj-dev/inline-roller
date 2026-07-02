@@ -16,7 +16,8 @@ already-rolled dice so they can be unit tested deterministically.
 import random
 import re
 
-TEST_PATTERN = re.compile(r"^(\d+)d20(?:f(\d+))?t(\d+)(?:c(\d+))?$")
+TEST_PREFIX_PATTERN = re.compile(r"^(\d+)d20(.*)$")
+TEST_FIELD_PATTERN = re.compile(r"([ftc])(\d+)")
 CHALLENGE_PATTERN = re.compile(r"^(\d+)cd$")
 
 # d6 face -> (result, effect) for Challenge Dice.
@@ -31,15 +32,38 @@ CHALLENGE_FACES = {
 
 
 def parse_test(expr: str):
-    """Return test params dict, or None if ``expr`` is not a Modiphius test."""
-    match = TEST_PATTERN.match(expr.strip())
-    if match is None:
+    """Return test params dict, or None if ``expr`` is not a Modiphius test.
+
+    The ``f`` (focus), ``t`` (target) and ``c`` (complication) fields may
+    appear in any order; ``t`` is required, ``f`` defaults to 1 and ``c`` to
+    20. Duplicate fields or trailing junk are rejected.
+    """
+    prefix = TEST_PREFIX_PATTERN.match(expr.strip())
+    if prefix is None:
         return None
+    count = int(prefix.group(1))
+    rest = prefix.group(2)
+
+    fields = {}
+    pos = 0
+    for field in TEST_FIELD_PATTERN.finditer(rest):
+        if field.start() != pos:  # gap or unexpected character
+            return None
+        letter = field.group(1)
+        if letter in fields:  # duplicate field
+            return None
+        fields[letter] = int(field.group(2))
+        pos = field.end()
+    if pos != len(rest):  # trailing junk after the last field
+        return None
+    if "t" not in fields:  # target number is mandatory
+        return None
+
     return {
-        "count": int(match.group(1)),
-        "focus": int(match.group(2)) if match.group(2) else 1,
-        "target": int(match.group(3)),
-        "comp": int(match.group(4)) if match.group(4) else 20,
+        "count": count,
+        "focus": fields.get("f", 1),
+        "target": fields["t"],
+        "comp": fields.get("c", 20),
     }
 
 
@@ -92,9 +116,20 @@ def _dice_str(dice) -> str:
     return ", ".join(str(d) for d in dice)
 
 
-def format_test_full(dice, successes: int, complications: int) -> str:
-    """Full result line for the dump channel."""
-    header = f"🎲 Rolling {len(dice)}d20: [{_dice_str(dice)}]"
+def _test_decode(count: int, focus: int, target: int, comp: int) -> str:
+    """Human-readable breakdown of a test command's parameters."""
+    return f"{count}d20 · Focus {focus} · TN {target} · Comp {comp}+"
+
+
+def format_test_full(command: str, dice, focus: int, target: int, comp: int,
+                     successes: int, complications: int) -> str:
+    """Full result block for the dump channel (the non-inline reference).
+
+    Includes the raw command and a decoded breakdown so the roll can be
+    referenced later, since the inline 【 】 view only shows the outcome.
+    """
+    ref = f"🎲 Rolling `{command}` · {_test_decode(len(dice), focus, target, comp)}"
+    dice_line = f"Dice: [{_dice_str(dice)}]"
     if successes > 0 and complications > 0:
         body = f"✨ {_successes(successes)} | ⚠️ {_complications(complications)}"
     elif successes > 0:
@@ -103,7 +138,7 @@ def format_test_full(dice, successes: int, complications: int) -> str:
         body = f"💥 [Failure] | ⚠️ {_complications(complications)}"
     else:
         body = "💥 [Failure]"
-    return f"{header}\n{body}"
+    return f"{ref}\n{dice_line}\n{body}"
 
 
 def format_test_inline(successes: int, complications: int) -> str:
@@ -117,9 +152,12 @@ def format_test_inline(successes: int, complications: int) -> str:
     return "【 💥 】"
 
 
-def format_challenge_full(dice, result: int, effects: int) -> str:
-    header = f"🎲 Rolling {len(dice)}d6: [{_dice_str(dice)}]"
-    return f"{header}\n**Total Result:** {result} | **Total Effects:** {effects}"
+def format_challenge_full(command: str, dice, result: int,
+                          effects: int) -> str:
+    ref = f"🎲 Rolling `{command}` · {len(dice)} Challenge Dice"
+    dice_line = f"Dice: [{_dice_str(dice)}]"
+    totals = f"**Total Result:** {result} | **Total Effects:** {effects}"
+    return f"{ref}\n{dice_line}\n{totals}"
 
 
 def format_challenge_inline(result: int, effects: int) -> str:
@@ -142,6 +180,7 @@ def roll(expr: str):
     ``None`` if ``expr`` is not Modiphius syntax and should fall through to
     the existing d20 path.
     """
+    command = expr.strip()
     test = parse_test(expr)
     if test is not None:
         dice = [random.randint(1, 20) for _ in range(test["count"])]
@@ -149,7 +188,10 @@ def roll(expr: str):
             dice, test["focus"], test["target"], test["comp"]
         )
         return {
-            "full_text": format_test_full(dice, successes, complications),
+            "full_text": format_test_full(
+                command, dice, test["focus"], test["target"], test["comp"],
+                successes, complications
+            ),
             "inline": format_test_inline(successes, complications),
             "summary": _test_summary(successes, complications),
             "expression": str(dice),
@@ -160,7 +202,7 @@ def roll(expr: str):
         dice = [random.randint(1, 6) for _ in range(challenge["count"])]
         result, effects = evaluate_challenge(dice)
         return {
-            "full_text": format_challenge_full(dice, result, effects),
+            "full_text": format_challenge_full(command, dice, result, effects),
             "inline": format_challenge_inline(result, effects),
             "summary": f"{result} Result | {effects} Effects",
             "expression": str(dice),
