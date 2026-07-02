@@ -4,6 +4,7 @@ import re
 import os
 import json
 import asyncio
+import modiphius
 from repository import ConfigRepository, RollHistoryRepository
 from discord.ext import commands
 from dotenv import load_dotenv
@@ -114,6 +115,18 @@ async def on_message(message):
     result_texts = []
     histories_list = []
     for inline_roll in inline_rolls:
+        modiphius_result = modiphius.roll(inline_roll)
+        if modiphius_result is not None:
+            result_texts.append(modiphius_result["full_text"])
+            content = content.replace(
+                f"[[{inline_roll}]]", modiphius_result["inline"], 1
+            )
+            histories_list.append({
+                "message": message,
+                "modiphius": modiphius_result,
+                "command": inline_roll
+            })
+            continue
         result = d20.roll(inline_roll, allow_comments=True)
         result_text = f"{result.comment}: {result}" if result.comment else \
             str(result)
@@ -331,10 +344,34 @@ async def insert_roll_history(
     )
 
 
+async def insert_modiphius_history(
+        message: discord.Message,
+        modiphius_result: dict,
+        command: str
+        ):
+    history_repo = RollHistoryRepository()
+    history_repo.add_history(
+        guild_id=message.guild.id,
+        character_name=message.author.name,
+        dice_roll=command,
+        result=modiphius_result['summary'],
+        expression=modiphius_result['expression'],
+        crit=0,
+        room_name=message.channel.name
+    )
+
+
 async def insert_roll_histories(
         histories_list
         ):
     for history in histories_list:
+        if 'modiphius' in history:
+            await insert_modiphius_history(
+                message=history['message'],
+                modiphius_result=history['modiphius'],
+                command=history['command']
+            )
+            continue
         await insert_roll_history(
             message=history['message'],
             d20_roll=history['d20_roll'],
