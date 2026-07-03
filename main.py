@@ -15,7 +15,9 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 intents = discord.Intents.all()
 command_prefix = ";;"
 
-bot = commands.Bot(command_prefix=[command_prefix], intents=intents)
+bot = commands.Bot(
+    command_prefix=[command_prefix], intents=intents, help_command=None
+)
 
 
 # Default server config; also the shape every stored config is normalised to.
@@ -203,6 +205,68 @@ async def settings_error(ctx, error):
         )
     elif isinstance(error, commands.NoPrivateMessage):
         await ctx.send("This command only works inside a server.")
+
+
+def build_help_embed() -> discord.Embed:
+    embed = discord.Embed(
+        title="Inline Roller — Help",
+        description=(
+            "Put dice in **double brackets** inside a proxied "
+            "(Tupperbox) message. The bot rolls it, swaps it inline for "
+            "the result, and posts the full breakdown to the dump channel.\n"
+            "Example: `[[1d20+5]]` → 【 18 】"
+        ),
+        color=discord.Color.gold(),
+    )
+    embed.add_field(
+        name="Standard dice",
+        value=(
+            "`[[1d20]]` · `[[2d6+3]]` · `[[1d100]]`\n"
+            "Add a comment: `[[1d20+5 attack]]`"
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="Modiphius 2d20 test",
+        value=(
+            "`[[<n>d20 t<TN> f<focus> c<range>]]`\n"
+            "• `t` target number — **required**\n"
+            "• `f` focus — optional, default `1` "
+            "(roll ≤ focus = 2 successes, ≤ TN = 1 success)\n"
+            "• `c` complication range — optional, default `0` "
+            "(`c1` → complication on 19-20, `c2` → 18-20)\n"
+            "Example: `[[2d20f3t12c1]]`"
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="Challenge dice",
+        value=(
+            "`[[<n>cd]]` rolls a pool of d6 for results & effects.\n"
+            "Example: `[[6cd]]`"
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="Manage a roll",
+        value="React to a proxied roll message: ❌ delete · 📝 edit",
+        inline=False,
+    )
+    embed.add_field(
+        name="Commands",
+        value=(
+            f"`{command_prefix}settings` — set the dump channel & thread "
+            "behavior *(Manage Server)*\n"
+            f"`{command_prefix}help` — show this message"
+        ),
+        inline=False,
+    )
+    return embed
+
+
+@bot.command(name="help")
+async def help_command(ctx):
+    await ctx.send(embed=build_help_embed())
 
 
 @bot.event
