@@ -5,12 +5,14 @@ import modiphius
 
 class ParseTestCase(unittest.TestCase):
     def test_all_fields(self):
+        # c1 -> complication range of 1, i.e. threshold 20 - 1 = 19.
         self.assertEqual(
-            modiphius.parse_test("2d20f3t12c19"),
+            modiphius.parse_test("2d20f3t12c1"),
             {"count": 2, "focus": 3, "target": 12, "comp": 19},
         )
 
     def test_focus_and_comp_default(self):
+        # No c -> range 0 -> threshold 20 (complication only on a natural 20).
         self.assertEqual(
             modiphius.parse_test("2d20t12"),
             {"count": 2, "focus": 1, "target": 12, "comp": 20},
@@ -23,9 +25,17 @@ class ParseTestCase(unittest.TestCase):
         )
 
     def test_comp_only(self):
+        # c1 -> threshold 19 (19-20 are complications).
         self.assertEqual(
-            modiphius.parse_test("2d20t12c19"),
+            modiphius.parse_test("2d20t12c1"),
             {"count": 2, "focus": 1, "target": 12, "comp": 19},
+        )
+
+    def test_comp_range_two(self):
+        # c2 -> threshold 18 (18-20 are complications).
+        self.assertEqual(
+            modiphius.parse_test("2d20t12c2"),
+            {"count": 2, "focus": 1, "target": 12, "comp": 18},
         )
 
     def test_whitespace_tolerated(self):
@@ -37,19 +47,19 @@ class ParseTestCase(unittest.TestCase):
     def test_field_order_is_interchangeable(self):
         expected = {"count": 2, "focus": 3, "target": 12, "comp": 19}
         for expr in [
-            "2d20f3t12c19",
-            "2d20f3c19t12",
-            "2d20t12f3c19",
-            "2d20t12c19f3",
-            "2d20c19f3t12",
-            "2d20c19t12f3",
+            "2d20f3t12c1",
+            "2d20f3c1t12",
+            "2d20t12f3c1",
+            "2d20t12c1f3",
+            "2d20c1f3t12",
+            "2d20c1t12f3",
         ]:
             self.assertEqual(modiphius.parse_test(expr), expected, expr)
 
     def test_partial_fields_any_order(self):
         # t + c only, c before t.
         self.assertEqual(
-            modiphius.parse_test("2d20c19t12"),
+            modiphius.parse_test("2d20c1t12"),
             {"count": 2, "focus": 1, "target": 12, "comp": 19},
         )
         # t + f only, t before f.

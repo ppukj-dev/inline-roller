@@ -3,8 +3,11 @@
 Two roll types live inside the same ``[[ ]]`` inline notation the bot already
 uses:
 
-* **Skill Tests** — ``x<count>d20 f<focus> t<target> c<comp>`` e.g. ``2d20f3t12c19``.
-  ``f`` and ``c`` are optional and default to ``focus=1`` / ``comp=20``.
+* **Skill Tests** — ``x<count>d20 f<focus> t<target> c<comp>`` e.g. ``2d20f3t12c1``.
+  ``f`` and ``c`` are optional and default to ``focus=1`` / ``comp=0``. ``c`` is
+  the *complication range* — how many extra faces below 20 also trigger a
+  complication: ``c0`` (default) means only a natural 20, ``c1`` means 19-20,
+  ``c2`` means 18-20, and so on.
   ``t`` (target number) is required, which is also what distinguishes a
   Modiphius test from a plain ``d20``-library roll like ``[[2d20]]``.
 * **Challenge Dice** — ``<count>cd`` e.g. ``6cd`` rolls a pool of d6.
@@ -34,9 +37,12 @@ CHALLENGE_FACES = {
 def parse_test(expr: str):
     """Return test params dict, or None if ``expr`` is not a Modiphius test.
 
-    The ``f`` (focus), ``t`` (target) and ``c`` (complication) fields may
-    appear in any order; ``t`` is required, ``f`` defaults to 1 and ``c`` to
-    20. Duplicate fields or trailing junk are rejected.
+    The ``f`` (focus), ``t`` (target) and ``c`` (complication range) fields
+    may appear in any order; ``t`` is required, ``f`` defaults to 1 and ``c``
+    to 0. The returned ``comp`` is the complication *threshold* (a die at or
+    above it is a complication), derived as ``20 - c`` so ``c0`` yields 20,
+    ``c1`` yields 19, and so on. Duplicate fields or trailing junk are
+    rejected.
     """
     prefix = TEST_PREFIX_PATTERN.match(expr.strip())
     if prefix is None:
@@ -63,7 +69,7 @@ def parse_test(expr: str):
         "count": count,
         "focus": fields.get("f", 1),
         "target": fields["t"],
-        "comp": fields.get("c", 20),
+        "comp": 20 - fields.get("c", 0),
     }
 
 
