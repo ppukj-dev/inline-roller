@@ -1,3 +1,4 @@
+import json
 import sqlite3
 
 
@@ -43,18 +44,26 @@ class ConfigRepository(Repository):
 
         return result
 
-    def set_dump_channel(self, guild_id: str, dump_channel_id: str) -> None:
+    def set_config(self, guild_id: str, dump_channel_id: int,
+                   thread_dump_target: str) -> None:
+        """Upsert the full server config for ``guild_id``.
+
+        The whole config object is (re)written, so callers pass every field
+        they want persisted rather than patching individual keys.
+        """
+        config = json.dumps({
+            "dump_channel_id": dump_channel_id,
+            "thread_dump_target": thread_dump_target,
+        })
         query = """
         INSERT INTO server_config (guild_id, config)
-        VALUES (?, JSON_SET('{}', '$.dump_channel_id', ?))
+        VALUES (?, ?)
         ON CONFLICT(guild_id) DO UPDATE
-            SET config = JSON_SET(config, '$.dump_channel_id', ?)
+            SET config = ?
         """
 
         with self as db:
-            db.cursor.execute(query, (
-                guild_id, dump_channel_id,
-                dump_channel_id))
+            db.cursor.execute(query, (guild_id, config, config))
             db.connection.commit()
 
 

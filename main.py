@@ -18,32 +18,191 @@ command_prefix = ";;"
 bot = commands.Bot(command_prefix=[command_prefix], intents=intents)
 
 
-@bot.command(name="setdump")
-async def set_dump(ctx, *, channel_url=None):
-    dump_channel_id = ctx.channel.id
-    if channel_url is not None:
-        dump_channel_id = int(get_channel_id_from_url(channel_url))
-    dump_channel = await bot.fetch_channel(dump_channel_id)
-    if hasattr(dump_channel, "parent"):
-        dump_channel_id = dump_channel.parent.id
-    guild_id = ctx.guild.id
-    config_repo = ConfigRepository()
-    config_repo.set_dump_channel(guild_id, dump_channel_id)
-    await ctx.send(f"Dump channel set to <#{dump_channel_id}>")
+# Default server config; also the shape every stored config is normalised to.
+DEFAULT_CONFIG = {"dump_channel_id": 0, "thread_dump_target": "dump_channel"}
+
+# thread_dump_target value -> human label shown in the settings embed.
+THREAD_TARGET_LABELS = {
+    "dump_channel": "Dump channel",
+    "parent_channel": "Parent channel",
+}
 
 
-@bot.command(name="getdump")
-async def get_dump(ctx):
-    config_repo = ConfigRepository()
-    if config_repo.get_config(ctx.guild.id) is None:
-        await ctx.send(
-            "No dump channel set.\n" +
-            f"Use `{command_prefix}setdump` to set one."
+def load_server_config(guild_id) -> dict:
+    """Return this guild's config merged over ``DEFAULT_CONFIG``."""
+    row = ConfigRepository().get_config(guild_id)
+    if row is None:
+        return dict(DEFAULT_CONFIG)
+    stored = json.loads(row[0])
+    return {
+        "dump_channel_id": int(stored.get("dump_channel_id", 0) or 0),
+        "thread_dump_target": stored.get(
+            "thread_dump_target", DEFAULT_CONFIG["thread_dump_target"]
+        ),
+    }
+
+
+class SettingsView(discord.ui.View):
+    """Interactive settings panel.
+
+    Dropdowns only stage changes into ``self.pending``; nothing is written to
+    the database until the Save button is pressed. The embed re-renders after
+    every interaction so the pending-vs-saved diff is always visible.
+    """
+
+    def __init__(self, guild_id: int, author_id: int, saved: dict):
+        super().__init__(timeout=180)
+        self.guild_id = guild_id
+        self.author_id = author_id
+        self.saved = dict(saved)
+        self.pending = dict(saved)
+        self.message = None  # set by the command once the panel is sent
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message(
+                f"This settings panel isn't yours — run "
+                f"`{command_prefix}settings` yourself.",
+                ephemeral=True,
+            )
+            return False
+        if not interaction.user.guild_permissions.manage_guild:
+            await interaction.response.send_message(
+                "You need the **Manage Server** permission to change settings.",
+                ephemeral=True,
+            )
+            return False
+        return True
+
+    @staticmethod
+    def _dump_channel_str(config: dict) -> str:
+        channel_id = config["dump_channel_id"]
+        return f"<#{channel_id}>" if channel_id else "*Not set*"
+
+    def build_embed(self, note: str = None) -> discord.Embed:
+        embed = discord.Embed(
+            title="⚙️ Inline Roller Settings",
+            color=discord.Color.blurple(),
         )
-        return
-    config_string = config_repo.get_config(ctx.guild.id)[0]
-    config = json.loads(config_string)
-    await ctx.send(f"Dump channel: <#{config['dump_channel_id']}>")
+        embed.add_field(
+            name="Dump channel",
+            value=self._dump_channel_str(self.saved),
+            inline=True,
+        )
+        embed.add_field(
+            name="Thread rolls dump to",
+            value=THREAD_TARGET_LABELS[self.saved["thread_dump_target"]],
+            inline=True,
+        )
+        if self.pending != self.saved:
+            lines = []
+            if self.pending["dump_channel_id"] != self.saved["dump_channel_id"]:
+                lines.append(
+                    f"• Dump channel → {self._dump_channel_str(self.pending)}"
+                )
+            if self.pending["thread_dump_target"] != \
+                    self.saved["thread_dump_target"]:
+                lines.append(
+                    "• Thread rolls → "
+                    f"{THREAD_TARGET_LABELS[self.pending['thread_dump_target']]}"
+                )
+            embed.add_field(
+                name="⚠️ Unsaved changes",
+                value="\n".join(lines) + "\n**Click Save to apply.**",
+                inline=False,
+            )
+        if note:
+            embed.set_footer(text=note)
+        return embed
+
+    async def _refresh(self, interaction: discord.Interaction,
+                       note: str = None):
+        await interaction.response.edit_message(
+            embed=self.build_embed(note), view=self
+        )
+
+    @discord.ui.select(
+        cls=discord.ui.ChannelSelect,
+        channel_types=[discord.ChannelType.text],
+        placeholder="Dump channel…",
+        min_values=1,
+        max_values=1,
+        row=0,
+    )
+    async def dump_channel_select(self, interaction: discord.Interaction,
+                                  select: discord.ui.ChannelSelect):
+        self.pending["dump_channel_id"] = select.values[0].id
+        await self._refresh(interaction)
+
+    @discord.ui.select(
+        placeholder="When rolled in a thread, dump to…",
+        min_values=1,
+        max_values=1,
+        row=1,
+        options=[
+            discord.SelectOption(
+                label="Dump channel", value="dump_channel",
+                description="Thread rolls go to the configured dump channel."
+            ),
+            discord.SelectOption(
+                label="Parent channel", value="parent_channel",
+                description="Thread rolls go to the thread's parent channel."
+            ),
+        ],
+    )
+    async def thread_target_select(self, interaction: discord.Interaction,
+                                   select: discord.ui.Select):
+        self.pending["thread_dump_target"] = select.values[0]
+        await self._refresh(interaction)
+
+    @discord.ui.button(label="Save", style=discord.ButtonStyle.success, row=2)
+    async def save_button(self, interaction: discord.Interaction,
+                          button: discord.ui.Button):
+        ConfigRepository().set_config(
+            self.guild_id,
+            self.pending["dump_channel_id"],
+            self.pending["thread_dump_target"],
+        )
+        self.saved = dict(self.pending)
+        await self._refresh(interaction, note="✅ Settings saved.")
+
+    @discord.ui.button(
+        label="Reset to defaults", style=discord.ButtonStyle.secondary, row=2
+    )
+    async def reset_button(self, interaction: discord.Interaction,
+                           button: discord.ui.Button):
+        self.pending = dict(DEFAULT_CONFIG)
+        await self._refresh(
+            interaction, note="Defaults staged — click Save to apply."
+        )
+
+    async def on_timeout(self):
+        for child in self.children:
+            child.disabled = True
+        if self.message is not None:
+            try:
+                await self.message.edit(view=self)
+            except discord.HTTPException:
+                pass
+
+
+@bot.command(name="settings")
+@commands.guild_only()
+@commands.has_permissions(manage_guild=True)
+async def settings(ctx):
+    saved = load_server_config(ctx.guild.id)
+    view = SettingsView(ctx.guild.id, ctx.author.id, saved)
+    view.message = await ctx.send(embed=view.build_embed(), view=view)
+
+
+@settings.error
+async def settings_error(ctx, error):
+    if isinstance(error, commands.MissingPermissions):
+        await ctx.send(
+            "You need the **Manage Server** permission to use this."
+        )
+    elif isinstance(error, commands.NoPrivateMessage):
+        await ctx.send("This command only works inside a server.")
 
 
 @bot.event
@@ -87,26 +246,30 @@ async def on_message(message):
         return
     display_name = message.author.display_name
     avatar = message.author.avatar
+    channel_mention = message.channel.mention  # where the roll happened
+
+    config = load_server_config(message.guild.id)
+    dump_channel_id = config["dump_channel_id"]
+    thread_target = config["thread_dump_target"]
+
     channel = message.channel
-    channel_mention = channel.mention
-    has_dump_channel = False
-
     thread = None
-    dump_channel_id = get_dump_channel_from_config(message.guild.id)
-    if dump_channel_id != "0":
-        dump_channel = await bot.fetch_channel(dump_channel_id)
-        has_dump_channel = True
-    if hasattr(message.channel, "parent"):
-        channel = message.channel.parent
+    if getattr(message.channel, "parent", None) is not None:
+        channel = message.channel.parent  # webhook posts to the parent
         thread = message.channel
-        if not has_dump_channel:
-            dump_channel = channel
 
-    if dump_channel_id == "0" and thread is None:
+    # Resolve where the full-result dump is sent.
+    if thread is not None and thread_target == "parent_channel":
+        dump_channel = channel  # the thread's parent
+    elif dump_channel_id:
+        dump_channel = await bot.fetch_channel(dump_channel_id)
+    elif thread is not None:
+        dump_channel = channel  # no dump channel set -> fall back to parent
+    else:
         await message.channel.send(
             "No dump channel set.\n" +
-            "Please use in thread, or set one first.\n" +
-            f"Use `{command_prefix}setdump` to set one."
+            "Please roll inside a thread, or set one first.\n" +
+            f"Use `{command_prefix}settings` to configure it."
         )
         return
 
@@ -204,22 +367,6 @@ async def send_to_thread_by_webhook(thread, content, avatar, username,
 def find_inline_roll(content: str):
     pattern = r'\[\[(.*?)\]\]'
     return re.findall(pattern=pattern, string=content)
-
-
-def get_channel_id_from_url(channel_url: int):
-    channel_id = re.findall(r"(\d+)$", channel_url)[0]
-    if channel_id.isdigit():
-        return int(channel_id)
-    return 0
-
-
-def get_dump_channel_from_config(guild_id) -> str:
-    config_repo = ConfigRepository()
-    if config_repo.get_config(guild_id) is None:
-        return "0"
-    config_string = config_repo.get_config(guild_id)[0]
-    config = json.loads(config_string)
-    return config['dump_channel_id']
 
 
 async def delete_reaction_message(reaction, user, webhook):

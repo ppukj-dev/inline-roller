@@ -177,3 +177,5 @@ pyrightconfig.json
 
 # sqlite db
 database/inline_roller.db
+
+.claude
